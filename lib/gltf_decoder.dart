@@ -1,6 +1,3 @@
-import 'dart:convert';
-
-
 int UID_MAX_LENGTH = 10;
 int USHF_MAX_LENGTH = 10;
 int TIMESTAMP_MAX_LENGTH = 10;
@@ -17,21 +14,22 @@ int TIMESTAMP_VALIDITY_MAX_LENGTH = 5;
 // }
 
 
-int b602num(String symbol) {
-  if (symbol.length != 1) {
-    throw const FormatException("Input must be a single character");
+int b602num(String asc) {
+  const String validChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz23456789";
+
+  if (!validChars.contains(asc)) {
+    print("BASE60 decoder received symbol out of range: $asc");
+    return -1; // or handle the error as needed
   }
 
-  int codeUnit = symbol.codeUnitAt(0);
+  int num = asc.codeUnitAt(0);
 
-  if (codeUnit >= 'A'.codeUnitAt(0) && codeUnit <= 'Z'.codeUnitAt(0)) {
-    return codeUnit - 'A'.codeUnitAt(0);
-  } else if (codeUnit >= 'a'.codeUnitAt(0) && codeUnit <= 'z'.codeUnitAt(0)) {
-    return codeUnit - 'a'.codeUnitAt(0) + 26;
-  } else if (codeUnit >= '2'.codeUnitAt(0) && codeUnit <= '9'.codeUnitAt(0)) {
-    return codeUnit - '2'.codeUnitAt(0) + 52;
+  if (num >= 97) {
+    return num - 97 + 26;
+  } else if (num >= 65) {
+    return num - 65;
   } else {
-    throw FormatException("Invalid BASE60 symbol: $symbol");
+    return num - 50 + 52;
   }
 }
 
@@ -90,15 +88,16 @@ Map<String, dynamic> decodeGltfAndToken(Map<String, dynamic> egltf, String etkn)
     Map<String, dynamic> accessor = egltfAccessors[k];
     if (accessor['type'] == 'VEC3') {
       // Transcribe data from encoded GLTF into matrix form
-      List<List<String>> unshMatrix = List.generate(6, (_) => List.filled(5, '0'));
+      List<List<String>> unshMatrix = List.generate(6, (i) => List.filled(5, '0'));
       for (int i = 0; i < 3; i++) {
-        String encVal = (accessor['max'][i].toString().padLeft(6, '0').substring(1, 6));
+        String encVal = accessor['max'] != null ? (accessor['max'][i].toString().substring(accessor['max'][i].toString().length - 6).substring(0, 5)) : '00000';
         for (int j = 0; j < 5; j++) {
           unshMatrix[i][j] = encVal[j];
         }
       }
+
       for (int i = 0; i < 3; i++) {
-        String encVal = (accessor['min'][i].toString().padLeft(6, '0').substring(1, 6));
+        String encVal = accessor['min'] != null ? (accessor['min'][i].toString().substring(accessor['min'][i].toString().length - 6).substring(0, 5)) : '00000';
         for (int j = 0; j < 5; j++) {
           unshMatrix[i + 3][j] = encVal[j];
         }
@@ -111,10 +110,7 @@ Map<String, dynamic> decodeGltfAndToken(Map<String, dynamic> egltf, String etkn)
         int colIndex = unshOffsetList[i] % 5;
         decKey += unshMatrix[rowIndex][colIndex];
       }
-      double decimalValue = double.tryParse(decKey) ?? 0.0;
-      decKey = BigInt.from(decimalValue).toString();
-
-      //decKey = BigInt.parse(decKey).toString(); // Convert to BigInt to remove leading zeros
+      decKey = BigInt.parse(decKey).toString(); // Convert to BigInt to remove leading zeros
 
       // Update the count in the accessor
       accessor['count'] = BigInt.parse(decKey);
@@ -122,29 +118,14 @@ Map<String, dynamic> decodeGltfAndToken(Map<String, dynamic> egltf, String etkn)
   }
 
   List<int> deshOffsetList = List.from(unshOffsetList)..sort();
-  List<int> unshOffsetListNorm = unshOffsetList.map((e) => deshOffsetList.indexOf(e)).toList();
+  List<int> unshOffsetListNorm = unshOffsetList.map((x) => deshOffsetList.indexOf(x)).toList();
 
-  //List<Map<String, dynamic>> egltfAnimationsChannels = egltf['animations'][0]['channels'];
-  List<Map<String, dynamic>> egltfAnimationsChannels;
-  var animations = egltf['animations'];
+  //List<Map<String, dynamic>> egltfAnimationsChannels = (egltf['animations'] as List<Map<String, dynamic>>)[0]['channels'] as List<Map<String, dynamic>>;
+  List<dynamic> animations = egltf['animations'] as List<dynamic>;
+  Map<String, dynamic> firstAnimation = animations[0] as Map<String, dynamic>;
+  List<Map<String, dynamic>> egltfAnimationsChannels = (firstAnimation['channels'] as List<dynamic>).map((e) => e as Map<String, dynamic>).toList();
 
-  if (animations is List<dynamic> && animations.isNotEmpty) {
-    var firstAnimation = animations[0];
-    if (firstAnimation is Map<String, dynamic> && firstAnimation.containsKey('channels')) {
-      var channels = firstAnimation['channels'];
-      if (channels is List<dynamic>) {
-        egltfAnimationsChannels = channels.map((e) => e as Map<String, dynamic>).toList();
-      } else {
-        throw Exception('Channels are not in the expected format');
-      }
-    } else {
-      throw Exception('First animation is not in the expected format');
-    }
-  } else {
-    throw Exception('Animations are not in the expected format');
-  }
-
-  for (int i = 0; i < (egltfAnimationsChannels.length / 10).floor(); i++) {
+  for (int i = 0; i < (egltfAnimationsChannels.length ~/ 10); i++) {
     List<int> deorderedIndexVals = [];
     for (int j = 0; j < 10; j++) {
       deorderedIndexVals.add(egltfAnimationsChannels[i * 10 + j]['target']['node']);
